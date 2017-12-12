@@ -271,51 +271,8 @@ bool strVariantAddition(const char *canonical, const char *variant, char *error)
 	return variantAddition(canonical, strlen(canonical), variant, strlen(variant), error);
 }
 
-bool strictVariantAddition(const char *canonical, int canLength, const char *variant, int varLength)
-{
-	if (equalString(canonical, canLength, variant, varLength))
-	{
-		return true;
-	}
-	else
-	{
-		int diffIndex = stringDiff(canonical, canLength, variant, varLength);
 
-		if (2 * diffIndex > varLength)
-			diffIndex = varLength / 2; //Due to integer math, this equals the floor()
-
-		char* newBuffer = (char*)malloc(canLength*sizeof(char));
-
-		//Progressively move length DOWN from diffIndex
-		for (int index = diffIndex; index > 0; --index)
-		{
-			int subIndex = 0;
-
-			//Move subIndex UP, shortening towards index
-			for (; subIndex < index; ++subIndex)
-			{
-				if (equalString(variant + index, subIndex - index, variant + subIndex, subIndex - index))
-				{
-					if (false)//Perform new variant addition and return result if true
-					{
-						free(newBuffer);
-						return true;
-					}
-				}
-				else
-				{
-
-				}
-			}
-		}
-
-		free(newBuffer);
-		return false;
-	}
-}
-
-//Variant expects a buffer containing varLength^2 bytes of memory to be passed to it
-bool strictBinaryVariantAddition(const char *canonical, int canLength, const char *variant, int varLength)
+bool pureStrictBinaryVariantAddition(const char *canonical, int canLength, const char *variant, int varLength)
 {
 	if (varLength > canLength)
 	{
@@ -323,7 +280,47 @@ bool strictBinaryVariantAddition(const char *canonical, int canLength, const cha
 
 		if (varLength % 2 == 0
 			&& compareArrays(variant, variant + innerLength, innerLength)
-			&& strictBinaryVariantAddition(canonical, canLength, variant, innerLength)) /*Half point Sub-strings exist and match*/
+			&& pureStrictBinaryVariantAddition(canonical, canLength, variant, innerLength)) /*Half point Sub-strings exist and match*/
+		{
+			return true;
+		}
+		else if (canLength > 1)/*Half-point recursion was not possible or didn't return a positive result*/
+		{
+			//If possible (i.e. canLength > 1), perform split, running through variant splits from ([0,1] [1,varLength]) to ([0,varLength-1] [varLength-1,varLength]), and -for each variant split- run through all possible canonical splits and recurse through
+			for (int varSplit = 1; varSplit < varLength; ++varSplit)
+			{
+				for (int canSplit = 0; canSplit < canLength; ++canSplit)
+				{
+					if (pureStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit) && pureStrictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit))
+						return true;
+				}
+			}
+		}
+
+		return false;
+	}
+	else
+	{
+		return equalString(canonical, canLength, variant, varLength);
+	}
+}
+
+
+//Variant expects a buffer containing varLength^2 bytes of memory to be passed to it
+bool strictBinaryVariantAdditionInner(const char *canonical, int canLength, const char *variant, int varLength)
+{
+	if (varLength > canLength)
+	{
+		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
+		{
+			return false;
+		}
+
+		int innerLength = varLength / 2;
+
+		if (varLength % 2 == 0
+			&& compareArrays(variant, variant + innerLength, innerLength)
+			&& strictBinaryVariantAdditionInner(canonical, canLength, variant, innerLength)) /*Half point Sub-strings exist and match*/
 		{
 			//Recursivly perform variant addition on one of the substrings
 			return true;
@@ -346,14 +343,14 @@ bool strictBinaryVariantAddition(const char *canonical, int canLength, const cha
 
 					if (canSplit <= canLength / 2)
 					{
-						if (strictBinaryVariantAddition(canonical, canSplit, variant, varSplit) && strictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit))
+						if (strictBinaryVariantAdditionInner(canonical, canSplit, variant, varSplit) && strictBinaryVariantAdditionInner(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit))
 						{
 							return true;
 						}
 					}
 					else
 					{
-						if (strictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit) && strictBinaryVariantAddition(canonical, canSplit, variant, varSplit))
+						if (strictBinaryVariantAdditionInner(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit) && strictBinaryVariantAdditionInner(canonical, canSplit, variant, varSplit))
 						{
 							return true;
 						}
@@ -363,6 +360,25 @@ bool strictBinaryVariantAddition(const char *canonical, int canLength, const cha
 		}
 
 		return false;
+	}
+	else
+	{
+		return equalString(canonical, canLength, variant, varLength);
+	}
+}
+
+bool strictBinaryVariantAddition(const char *canonical, int canLength, const char *variant, int varLength)
+{
+	if (varLength > canLength)
+	{
+		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
+		{
+			return false;
+		}
+		else
+		{
+			strictBinaryVariantAdditionInner(canonical, canLength, variant,varLength);
+		}
 	}
 	else
 	{
@@ -412,6 +428,12 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 
 	if (varLength > canLength)
 	{
+		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
+		{
+			*temp = MEMFALSE;
+			return false;
+		}
+
 		int innerLength = varLength / 2;
 
 		if (varLength % 2 == 0
@@ -509,6 +531,94 @@ bool memoizedStrictBinaryVariantAdditionInit(const char *canonical, const int ca
 		free(data.table);//Free A
 
 		return returnVal;
+	}
+	else
+	{
+		return canLength == varLength;
+	}
+}
+
+#define ALPHALENGTH 256
+
+struct canonicalLink
+{
+	canonicalLink *next;
+	int place;
+};
+
+bool scanningStrictBinaryVariantAddition(const char *canonical, const int canLength, const char *variant, const int varLength, char *error)
+{
+
+	if (canLength > 0 && varLength > 0)//Only perform the algorithm if there would be enough space, otherwise return true only if canLength and varLength are both 0
+	{
+		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
+			return false;
+
+		//Perform preliminary search
+		int canIndex = 0;
+		int varIndex = 0;
+
+		while (varIndex < varLength - 1 && canIndex < canLength - 1)
+		{
+
+			if (canonical[canIndex] == variant[varIndex] && canonical[canIndex + 1] == variant[varIndex + 1])
+			{
+				canIndex++;
+			}
+
+			++varIndex;
+		}
+
+		if (canIndex < canLength - 1)
+			return false;
+
+
+
+		int collectionTable[ALPHALENGTH];
+		int maxOccurance = 0;
+		int totalLinks = 0;
+		memset(collectionTable, 0, sizeof(collectionTable));
+
+		//Creats an array counting the occurances of all the possible characters while tracking the max value
+		for (int ii = 0; ii < canLength; ++ii)
+		{
+			collectionTable[canonical[ii]] += 1;
+		}
+
+		for (int jj = 0; jj < ALPHALENGTH; ++jj)
+		{
+			if (collectionTable[jj] > maxOccurance)
+				maxOccurance = collectionTable[jj];
+
+			if (collectionTable[jj] > 1)
+				totalLinks += (collectionTable[jj] - 1);
+		}
+
+		//Generate preliminary canon table
+		int *prelimTable = (int*)calloc(canLength, sizeof(int));//ALLOCATE A
+		//memset(prelimTableMemory, 0, ALPHALENGTH*canLength*sizeof(canonicalLink*));
+		//void *allocationPoint = prelimTableMemory;
+
+		int precursorTable[ALPHALENGTH];
+		memset(precursorTable, 0, sizeof(precursorTable));
+
+		for (int kk = 0; kk < canLength; ++kk)
+		{
+			if (precursorTable[canonical[kk]])
+			{
+				//Use the existing entry in the precursor table as the current preliminary backreference, then replace it
+				prelimTable[kk] = precursorTable[canonical[kk]];
+			}
+			else
+			{
+				//Put the index in the precursor table
+				precursorTable[canonical[kk]] = kk;
+			}
+		}
+
+
+		
+		free(prelimTable); //FREE A
 	}
 	else
 	{
