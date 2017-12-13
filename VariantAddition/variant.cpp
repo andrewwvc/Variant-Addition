@@ -311,46 +311,45 @@ bool strictBinaryVariantAdditionInner(const char *canonical, int canLength, cons
 {
 	if (varLength > canLength)
 	{
-		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
-		{
-			return false;
-		}
-
 		int innerLength = varLength / 2;
 
 		if (varLength % 2 == 0
 			&& compareArrays(variant, variant + innerLength, innerLength)
-			&& strictBinaryVariantAdditionInner(canonical, canLength, variant, innerLength)) /*Half point Sub-strings exist and match*/
+			&& strictBinaryVariantAdditionInner(canonical, canLength, variant, innerLength)) //Recursivly perform variant addition on one of the substrings
 		{
-			//Recursivly perform variant addition on one of the substrings
+			/*Half point Sub-strings exist and match*/
 			return true;
-			//Return true if this works
-			//otherwise...
 		}
 		else if (canLength > 1)/*Half-point recursion was not possible or didn't return a positive result*/
 		{
 			//If possible (i.e. canLength > 1), perform split, running through variant splits from ([0,1] [1,varLength]) to ([0,varLength-1] [varLength-1,varLength]), and -for each variant split- run through all possible canonical splits and recurse through
 			for (int varSplit = 1; varSplit < varLength; ++varSplit)
 			{
-				//int upperSplit = canLength < varSplit + 1 ? canLength : varSplit + 1;
+				const char *newVariant = (variant + varSplit);
+				const char newVariantStartVal = newVariant[0];
+				const char newVariantEndVal = variant[varSplit - 1];
+
 				int upperSplit = min(canLength, varSplit + 1);
-				//int current = canLength - 1 < varLength - varSplit ? canLength - 1: varLength - varSplit;
 				int current = min(canLength - 1, varLength - varSplit);
+
 				for (int canSplit = canLength - current; canSplit < upperSplit; ++canSplit)
 				{
 					/*if (strictBinaryVariantAddition(canonical, canSplit, variant, varSplit) && strictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit))
 						return true;*/
+					const char *newCanonical = (canonical + canSplit);
+					if (canonical[canSplit - 1] != newVariantEndVal || newCanonical[0] != newVariantStartVal)
+						continue;
 
 					if (canSplit <= canLength / 2)
 					{
-						if (strictBinaryVariantAdditionInner(canonical, canSplit, variant, varSplit) && strictBinaryVariantAdditionInner(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit))
+						if (strictBinaryVariantAdditionInner(canonical, canSplit, variant, varSplit) && strictBinaryVariantAdditionInner(newCanonical, canLength - canSplit, newVariant, varLength - varSplit))
 						{
 							return true;
 						}
 					}
 					else
 					{
-						if (strictBinaryVariantAdditionInner(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit) && strictBinaryVariantAdditionInner(canonical, canSplit, variant, varSplit))
+						if (strictBinaryVariantAdditionInner(newCanonical, canLength - canSplit, newVariant, varLength - varSplit) && strictBinaryVariantAdditionInner(canonical, canSplit, variant, varSplit))
 						{
 							return true;
 						}
