@@ -417,20 +417,25 @@ struct additionData
 char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLength, const char *variant, const int varLength, const additionData *data)
 {
 
-	char *temp = data->table + (data->canonicalIndex*	(canonical - data->initialCanonical)
+	 size_t index_val = (data->canonicalIndex*	(canonical - data->initialCanonical)
 							+ data->canLengthIndex*	(canLength-1)
 							+ data->variantIndex*	(variant - data->initialVariant)
 							+						(varLength-1));
-	if (*temp)
+
+	 char *temp = data->table + index_val / 4;
+	 size_t byte_offset = (index_val % 4) * 2;
+
+	 char temp_val = (*temp >> byte_offset) & 0x3;
+	 if (temp_val)
 	{
-		return (*temp >> 1);//This shift is equivilent to (*temp - 1) in the range [1 to 2]
+		return (temp_val >> 1);//This shift is equivilent to (*temp - 1) in the range [1 to 2]
 	}
 
 	if (varLength > canLength)
 	{
 		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
 		{
-			*temp = MEMFALSE;
+			*temp |= MEMFALSE << byte_offset;
 			return false;
 		}
 
@@ -441,8 +446,8 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 			&& memoizedStrictBinaryVariantAddition(canonical, canLength, variant, innerLength, data)) /*Half point Sub-strings exist and match*/
 		{
 			//Recursivly perform variant addition on one of the substrings
-			*temp = MEMTRUE;
-			return true;
+			*temp |= MEMTRUE << byte_offset;
+			return 1;
 		}
 		else if (canLength > 1)/*Half-point recursion was not possible or didn't return a positive result*/
 		{
@@ -466,7 +471,7 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 					{
 						if (memoizedStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit, data) && memoizedStrictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit, data))
 						{
-							*temp = MEMTRUE;
+							*temp |= MEMTRUE << byte_offset;
 							return 1;
 						}
 					}
@@ -474,7 +479,7 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 					{
 						if (memoizedStrictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit, data) && memoizedStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit, data))
 						{
-							*temp = MEMTRUE;
+							*temp |= MEMTRUE << byte_offset;
 							return 1;
 						}
 					}
@@ -482,13 +487,13 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 			}
 		}
 
-		*temp = MEMFALSE;
+		*temp |= MEMFALSE << byte_offset;
 		return false;
 	}
 	else
 	{
 		char retVal = (char)equalString(canonical, canLength, variant, varLength);
-		*temp = retVal + 1;
+		*temp |= (retVal + 1) << byte_offset;
 		return retVal;
 	}
 }
@@ -526,7 +531,7 @@ bool memoizedStrictBinaryVariantAdditionInit(const char *canonical, const int ca
 		data.initialCanLength = canLength;
 		data.initialVariant = variant;
 		data.initialVarLength = varLength;
-		data.tableSize = canLength*canLength*varLength*varLength;;
+		data.tableSize = canLength*canLength*varLength*varLength/4;//Byte packing (4 extended bools per byte) allows this to be fit into a smaller size
 		data.canonicalIndex = canLength*varLength*varLength;
 		data.canLengthIndex = varLength*varLength;
 		data.variantIndex = varLength;
