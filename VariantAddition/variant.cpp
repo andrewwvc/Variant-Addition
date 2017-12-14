@@ -4,6 +4,7 @@
 //Errors
 const char OOM = 1;//Out Of Memory
 const char BAD_INPUT = 2;
+const char ALGORITHMIC_ERROR = 4;
 
 inline bool compareArrays(const char *first, const char *second, int length)
 {
@@ -337,7 +338,7 @@ bool strictBinaryVariantAdditionInner(const char *canonical, int canLength, cons
 					/*if (strictBinaryVariantAddition(canonical, canSplit, variant, varSplit) && strictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit))
 						return true;*/
 					const char *newCanonical = (canonical + canSplit);
-					if (canonical[canSplit - 1] != newVariantEndVal || newCanonical[0] != newVariantStartVal)
+					if (*newCanonical != newVariantStartVal || canonical[canSplit - 1] != newVariantEndVal)
 						continue;
 
 					if (canSplit <= canLength / 2)
@@ -448,12 +449,19 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 			//If possible (i.e. canLength > 1), perform split, running through variant splits from ([0,1] [1,varLength]) to ([0,varLength-1] [varLength-1,varLength]), and -for each variant split- run through all possible canonical splits and recurse through
 			for (int varSplit = 1; varSplit < varLength; ++varSplit)
 			{
-				//int upperSplit = canLength < varSplit + 1 ? canLength : varSplit + 1;
-				int upperSplit = min(canLength, varSplit + 1);
-				//int current = canLength - 1 < varLength - varSplit ? canLength - 1: varLength - varSplit;
-				int current = min(canLength - 1, varLength - varSplit);
+				const char *newVariant = (variant + varSplit);
+				const char newVariantStartVal = newVariant[0];
+				const char newVariantEndVal = variant[varSplit - 1];
+
+				const int upperSplit = min(canLength, varSplit + 1);
+				const int current = min(canLength - 1, varLength - varSplit);
+
 				for (int canSplit = canLength - current; canSplit < upperSplit; ++canSplit)
 				{
+					const char *newCanonical = (canonical + canSplit);
+					if (*newCanonical != newVariantStartVal || canonical[canSplit - 1] != newVariantEndVal)
+						continue;
+
 					if (canSplit <= canLength/2)
 					{
 						if (memoizedStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit, data) && memoizedStrictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit, data))
@@ -644,19 +652,41 @@ bool printFalse(bool val)
 	return val;
 }
 
+LARGE_INTEGER StartingTime, EndingTime, ElapsedMicroseconds;
+LARGE_INTEGER Frequency;
+
 void printAll(const char *canonical, const char *variant, char *error)
 {
 	//printf("Lax -\n");
 	//printTruth(strVariantAddition(canonical, variant, error));
 	printf("Memoized Strict Binary -\n");
-	printTruth(strMSBVariantAddition(canonical, variant, error));
+	QueryPerformanceCounter(&StartingTime);
+	bool tval = strMSBVariantAddition(canonical, variant, error);
+	QueryPerformanceCounter(&EndingTime);
+	printTruth(tval);
+	printf("Time Elapsed - %i\n\n", ((EndingTime.QuadPart - StartingTime.QuadPart) * 1000000) / Frequency.QuadPart);
 	printf("Strict Binary -\n");
-	printTruth(strSBVariantAddition(canonical, variant));
+	QueryPerformanceCounter(&StartingTime);
+	bool tval2 = strSBVariantAddition(canonical, variant);
+	QueryPerformanceCounter(&EndingTime);
+	printTruth(tval2);
+	printf("Time Elapsed - %i\n\n", ((EndingTime.QuadPart - StartingTime.QuadPart) * 1000000) / Frequency.QuadPart);
+
+	if (tval != tval2)
+	{
+		*error |= ALGORITHMIC_ERROR;
+		printf("\n----\n*MISMATCH!*\nCanonic:\n%s\nVariant:\n%s\n----\n\n", canonical, variant);
+	}
 }
 
 int main(int argc, char *argv[])
 {
+	
+
+	QueryPerformanceFrequency(&Frequency);
+
 	char err = 0;
+	
 	printAll("", "", &err);
 	printAll("n", "nnnnnnnnnnnn", &err);
 	printAll("nnn", "nnnnnnnnnnn", &err);
@@ -675,6 +705,7 @@ int main(int argc, char *argv[])
 	printAll("abcd", "abcdabcda", &err);
 
 	printAll("adfhghsdfhghsdfhsdfas", "adfffhjksdfsdfdfsdffhjksdfsdfsdfksdfsdfsdfhf", &err);
+	printAll("adfhghsdfhghsdfhsdfas", "adfhghsdfhgfhghsdfhhsdfhsdfffhgfhghfffhgfhghsdfhhsdfhsdffffffffasasasasdffffffffasasasas", &err);
 
 	printf("\nPlease enter a canonical sequence:\n");
 
