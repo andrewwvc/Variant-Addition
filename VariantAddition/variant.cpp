@@ -1,5 +1,6 @@
 #include<stdio.h>
 #include<windows.h>
+#include <strsafe.h>
 
 //Errors
 const char OOM = 1;//Out Of Memory
@@ -369,20 +370,27 @@ bool strictBinaryVariantAdditionInner(const char *canonical, int canLength, cons
 
 bool strictBinaryVariantAddition(const char *canonical, int canLength, const char *variant, int varLength)
 {
-	if (varLength > canLength)
+	if (canLength > 0 && varLength > 0)
 	{
-		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
+		if (varLength > canLength)
 		{
-			return false;
+			if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
+			{
+				return false;
+			}
+			else
+			{
+				return strictBinaryVariantAdditionInner(canonical, canLength, variant, varLength);
+			}
 		}
 		else
 		{
-			strictBinaryVariantAdditionInner(canonical, canLength, variant,varLength);
+			return equalString(canonical, canLength, variant, varLength);
 		}
 	}
 	else
 	{
-		return equalString(canonical, canLength, variant, varLength);
+		return canLength == varLength;
 	}
 }
 
@@ -404,6 +412,7 @@ struct additionData
 	const char *initialCanonical;
 	const char *initialVariant;
 	char *table;
+	char *comparisonTable;
 };
 
 
@@ -422,10 +431,10 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 							+ data->variantIndex*	(variant - data->initialVariant)
 							+						(varLength-1));
 
-	 char *temp = data->table + index_val / 4;
+	 char *index_address = data->table + index_val / 4;
 	 size_t byte_offset = (index_val % 4) * 2;
 
-	 char temp_val = (*temp >> byte_offset) & 0x3;
+	 char temp_val = (*index_address >> byte_offset) & 0x3;
 	 if (temp_val)
 	{
 		return (temp_val >> 1);//This shift is equivilent to (*temp - 1) in the range [1 to 2]
@@ -435,8 +444,8 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 	{
 		if (canonical[0] != variant[0] || canonical[canLength - 1] != variant[varLength - 1])
 		{
-			*temp |= MEMFALSE << byte_offset;
-			return false;
+			*index_address |= MEMFALSE << byte_offset;
+			return 0;
 		}
 
 		int innerLength = varLength / 2;
@@ -446,7 +455,11 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 			&& memoizedStrictBinaryVariantAddition(canonical, canLength, variant, innerLength, data)) /*Half point Sub-strings exist and match*/
 		{
 			//Recursivly perform variant addition on one of the substrings
-			*temp |= MEMTRUE << byte_offset;
+			*index_address |= MEMTRUE << byte_offset;
+
+			//Record extra memoized value in the address of the higher half, starting at (variant + innerLength) instead of (variant)
+			size_t secondary_index_val = index_val + data->variantIndex * innerLength;
+			*(data->table + secondary_index_val / 4) |= MEMTRUE << ((secondary_index_val %4) * 2);
 			return 1;
 		}
 		else if (canLength > 1)/*Half-point recursion was not possible or didn't return a positive result*/
@@ -455,11 +468,12 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 			for (int varSplit = 1; varSplit < varLength; ++varSplit)
 			{
 				const char *newVariant = (variant + varSplit);
+				const int newVarLength = varLength - varSplit;
 				const char newVariantStartVal = newVariant[0];
 				const char newVariantEndVal = variant[varSplit - 1];
 
 				const int upperSplit = min(canLength, varSplit + 1);
-				const int current = min(canLength - 1, varLength - varSplit);
+				const int current = min(canLength - 1, newVarLength);
 
 				for (int canSplit = canLength - current; canSplit < upperSplit; ++canSplit)
 				{
@@ -469,17 +483,17 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 
 					if (canSplit <= canLength/2)
 					{
-						if (memoizedStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit, data) && memoizedStrictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit, data))
+						if (memoizedStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit, data) && memoizedStrictBinaryVariantAddition(newCanonical, canLength - canSplit, newVariant, newVarLength, data))
 						{
-							*temp |= MEMTRUE << byte_offset;
+							*index_address |= MEMTRUE << byte_offset;
 							return 1;
 						}
 					}
 					else
 					{
-						if (memoizedStrictBinaryVariantAddition(canonical + canSplit, canLength - canSplit, variant + varSplit, varLength - varSplit, data) && memoizedStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit, data))
+						if (memoizedStrictBinaryVariantAddition(newCanonical, canLength - canSplit, newVariant, newVarLength, data) && memoizedStrictBinaryVariantAddition(canonical, canSplit, variant, varSplit, data))
 						{
-							*temp |= MEMTRUE << byte_offset;
+							*index_address |= MEMTRUE << byte_offset;
 							return 1;
 						}
 					}
@@ -487,13 +501,13 @@ char memoizedStrictBinaryVariantAddition(const char *canonical, const int canLen
 			}
 		}
 
-		*temp |= MEMFALSE << byte_offset;
-		return false;
+		*index_address |= MEMFALSE << byte_offset;
+		return 0;
 	}
 	else
 	{
 		char retVal = (char)equalString(canonical, canLength, variant, varLength);
-		*temp |= (retVal + 1) << byte_offset;
+		*index_address |= (retVal + 1) << byte_offset;
 		return retVal;
 	}
 }
@@ -531,14 +545,14 @@ bool memoizedStrictBinaryVariantAdditionInit(const char *canonical, const int ca
 		data.initialCanLength = canLength;
 		data.initialVariant = variant;
 		data.initialVarLength = varLength;
-		data.tableSize = canLength*canLength*varLength*varLength/4;//Byte packing (4 extended bools per byte) allows this to be fit into a smaller size
+		data.tableSize = canLength*canLength*varLength*varLength / 4;//Byte packing (4 extended bools per byte) allows this to be fit into a smaller size
 		data.canonicalIndex = canLength*varLength*varLength;
 		data.canLengthIndex = varLength*varLength;
 		data.variantIndex = varLength;
 		data.varLengthIndex = 1;
 		data.table = (char *)calloc(data.tableSize, sizeof(char));//Calloc A
 
-		bool returnVal = (bool)memoizedStrictBinaryVariantAddition(canonical, canLength, variant, varLength, &data);
+		bool returnVal = 0 != memoizedStrictBinaryVariantAddition(canonical, canLength, variant, varLength, &data);
 
 		free(data.table);//Free A
 
@@ -684,10 +698,133 @@ void printAll(const char *canonical, const char *variant, char *error)
 	}
 }
 
+
+#define BUF_SIZE 256
+
+HANDLE WriteMutex;//Determines whihc thread has access to writing to output streams.
+HANDLE ProcessingSemaphore;//Grants an appropriate number of threads running time on the logical processors
+
+
+DWORD WINAPI threadedCall(const char *twoStrings[2])
+{
+	char error;
+
+	DWORD dwWaitResult = WaitForSingleObject(ProcessingSemaphore, INFINITE);
+	if (WAIT_OBJECT_0 == dwWaitResult)
+	{
+		//ENTER THE SEMAPHORE
+			LARGE_INTEGER start, end;
+
+			bool tval;
+			QueryPerformanceCounter(&start);
+			for (int ii = 0; ii < 1024; ++ii)
+				tval = strMSBVariantAddition(twoStrings[0], twoStrings[1], &error);
+			QueryPerformanceCounter(&end);
+
+			
+			WaitForSingleObject(WriteMutex, INFINITE);
+			//ENTER THE MUTEX
+
+				printf("Binary Addition (memoized) -\nCanonical:\n%s\nVariant:\n%s\n", twoStrings[0], twoStrings[1]);
+				printTruth(tval);
+				printf("Time Elapsed - %i\n\n", ((end.QuadPart - start.QuadPart) * 1000000) / Frequency.QuadPart);
+
+			//EXIT THE MUTEX
+			if (!ReleaseMutex(WriteMutex))
+			{
+				printf("ReleaseMutex error: %d\n", GetLastError());
+				ExitProcess(3);
+			}
+
+		//EXIT THE SEMAPHORE
+		if (!ReleaseSemaphore(
+			ProcessingSemaphore,  // handle to semaphore
+			1,            // increase count by one
+			NULL))
+		{
+			printf("ReleaseSemaphore error: %d\n", GetLastError());
+			ExitProcess(3);
+		}
+		
+		return true;
+	}
+	else
+	{
+		printf("Thread %d: Was not signalled by the semaphore!\n", GetCurrentThreadId());
+	}
+
+	return false;
+}
+
+void performThreading(char *err)
+{
+	WriteMutex = CreateMutex(NULL, false, NULL);
+
+	if (!WriteMutex)
+	{
+		printf("CreateMutex error: %d\n", GetLastError());
+		*err |= OOM;
+		return;
+	}
+
+	const int LogicalProcessors = 4;
+
+	ProcessingSemaphore = CreateSemaphore(
+		NULL,           // default security attributes
+		LogicalProcessors,  // initial count
+		LogicalProcessors,  // maximum count
+		NULL);          // unnamed semaphore
+
+	if (!ProcessingSemaphore)
+	{
+		printf("CreateSemaphore error: %d\n", GetLastError());
+		*err |= OOM;
+		return;
+	}
+
+
+	const char * firstArgs[][2] = {
+		{ "adfhghsdfhghsdfhsdfas", "adfhghsdfhgfhghsdfhhsdfhsdfffhgfhghfffhgfhghsdfhhsdfhsdffffffffasasasasdffffffffasasasas" },
+		{ "adfhghsdfhghsdfhsdfas", "adfhghsdfhgfhghsdfhhsdfhsdfffhgfhghfffhgfhghsdfhhsdfhsdffffffffasasasasdffffffffasasasas" },
+		{"nn", "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn"},//259ns
+		{"abracadabra","abracadabadabrara"}
+	};
+
+	const int NUM_THREADS = sizeof(firstArgs) / sizeof(const char *[2]);
+	printf("\nNUM_THREADS: %i\n\n", NUM_THREADS);
+
+	HANDLE threadA[NUM_THREADS];
+	DWORD threadA_ID[NUM_THREADS];
+	
+	for (int ii = 0; ii < NUM_THREADS; ++ii)
+	{
+		threadA[ii] = CreateThread(
+			NULL,       // default security attributes
+			0,          // default stack size
+			(LPTHREAD_START_ROUTINE)threadedCall,
+			firstArgs[ii],       // no thread function arguments
+			0,          // default creation flags
+			&threadA_ID[ii]);
+
+		if (!threadA[ii])
+		{
+			*err |= OOM;
+			ExitProcess(3);
+		}
+	}
+
+	WaitForMultipleObjects(NUM_THREADS, threadA, true, INFINITE);
+	for (int ii = 0; ii < NUM_THREADS; ++ii)
+	{
+		CloseHandle(threadA[ii]);
+	}
+
+	CloseHandle(WriteMutex);
+}
+
+
 int main(int argc, char *argv[])
 {
-	
-
 	QueryPerformanceFrequency(&Frequency);
 
 	char err = 0;
@@ -710,7 +847,9 @@ int main(int argc, char *argv[])
 	printAll("abcd", "abcdabcda", &err);
 
 	printAll("adfhghsdfhghsdfhsdfas", "adfffhjksdfsdfdfsdffhjksdfsdfsdfksdfsdfsdfhf", &err);
-	printAll("adfhghsdfhghsdfhsdfas", "adfhghsdfhgfhghsdfhhsdfhsdfffhgfhghfffhgfhghsdfhhsdfhsdffffffffasasasasdffffffffasasasas", &err);
+	//printAll("adfhghsdfhghsdfhsdfas", "adfhghsdfhgfhghsdfhhsdfhsdfffhgfhghfffhgfhghsdfhhsdfhsdffffffffasasasasdffffffffasasasas", &err);
+
+	performThreading(&err);
 
 	printf("\nPlease enter a canonical sequence:\n");
 
